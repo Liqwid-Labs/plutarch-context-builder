@@ -50,19 +50,41 @@ ac = Value.assetClass "abcd" "token_name"
 -- 
 sb :: SpendingBuilder () ()
 sb = foldr1 (<>)
-     [ inputFromPubKey (users !! 1) $ Value.assetClassValue ac 2000000
+     [ -- regular input from public key. Pubkey and amount is required. 
+       inputFromPubKey (users !! 1) $ Value.assetClassValue ac 2000000
+
+       -- regular input from public key with datum. 
      , inputFromPubKeyWith (users !! 2) (Value.assetClassValue ac 2000000) ()
-     , inputSelfExtra (Value.assetClassValue ac 2000000) ()
-     , outputToValidator (Value.assetClassValue ac 12345) ()
+
+       -- regular output to Pubkey, nothing special
      , outputToPubKey (users !! 1) $ Value.assetClassValue ac 4000000
+
+       -- 
+     
+       -- input to the address that is being validated. This input,
+       -- however, is *not* targeted to be validated.
+     , inputSelfExtra (Value.assetClassValue ac 2000000) ()
+     
+       -- output to the target validator specified in the config
+     , outputToValidator (Value.assetClassValue ac 12345) ()
      ]
 
+-- The ScriptContext will be fabricated by
+-- `spendingContext`. Normally, this would happend right before using
+-- the `ScriptContext`. Since only one UTXO input for validator
+-- exists, monoidal interface UTXO input is impossble and it needs to
+-- be provided in `spendingContext`.
+--
+-- Notice the return type being `Maybe ScriptContext`; on some
+-- occasions, context construction will fail due to internal
+-- errors. However, these errors *does not* account ScriptContext being
+-- a lawful context and *is not* a step-1 validation.
 context :: Maybe ScriptContext
 context = spendingContext
-          config
-          sb
-          (TestUTXO () $ Value.assetClassValue ac 987986)
+          config -- configuration 
+          sb     -- context builder
+          (TestUTXO () $ Value.assetClassValue ac 987986) -- input UTXO that is being validated.
           
 
 main :: IO()
-main = putStrLn $ show context
+main = pure ()

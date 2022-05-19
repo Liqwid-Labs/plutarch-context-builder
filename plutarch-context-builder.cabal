@@ -73,8 +73,10 @@ common common-tests
     , plutarch
     , plutarch-context-builder
     , plutus-ledger-api
+    , plutus-core
     , QuickCheck
     , tasty
+    , bytestring
 
 -- Libraries
 

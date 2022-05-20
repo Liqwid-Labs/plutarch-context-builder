@@ -103,24 +103,24 @@ context =
 
 main :: IO ()
 main =
-    defaultMain
-      $ testGroup
-          "Spending"
-          [ testCase "signed by" $ do
-              let signers = txInfoSignatories . scriptContextTxInfo $ context
-              forM_ [11, 12] $ (\a -> (elem (users !! a) signers) @? "signer not found: " <> show a)
-          , testCase "PubKey input" $ do
-              elem (userAddrs !! 1, Value.assetClassValue ac 2000000) inAddrVal @? "1"
-              elem (userAddrs !! 2, Value.assetClassValue ac 19721121) inAddrVal @? "2"
-          , testCase "PubKey output" $ do
-              elem (userAddrs !! 1, Value.assetClassValue ac 48639572) outAddrVal @? "1"
-              elem (userAddrs !! 4, Value.assetClassValue ac 92847592) outAddrVal @? "4"
-          , testCase "Validator input" $ do
-              elem (validatorAddr, Value.assetClassValue ac 687264) inAddrVal @? "validator input"
-              elem (validatorAddr, Value.assetClassValue ac 9575829) inAddrVal @? "extra input"
-          , testCase "Validator output" $ do
-              elem (validatorAddr, Value.assetClassValue ac 12345) outAddrVal @? "validator input"
-         ]
+    defaultMain $
+        testGroup
+            "Spending"
+            [ testCase "signed by" $ do
+                let signers = txInfoSignatories . scriptContextTxInfo $ context
+                forM_ [11, 12] $ (\a -> (elem (users !! a) signers) @? "signer not found: " <> show a)
+            , testCase "PubKey input" $ do
+                elem (userAddrs !! 1, Value.assetClassValue ac 2000000) inAddrVal @? "1"
+                elem (userAddrs !! 2, Value.assetClassValue ac 19721121) inAddrVal @? "2"
+            , testCase "PubKey output" $ do
+                elem (userAddrs !! 1, Value.assetClassValue ac 48639572) outAddrVal @? "1"
+                elem (userAddrs !! 4, Value.assetClassValue ac 92847592) outAddrVal @? "4"
+            , testCase "Validator input" $ do
+                elem (validatorAddr, Value.assetClassValue ac 687264) inAddrVal @? "validator input"
+                elem (validatorAddr, Value.assetClassValue ac 9575829) inAddrVal @? "extra input"
+            , testCase "Validator output" $ do
+                elem (validatorAddr, Value.assetClassValue ac 12345) outAddrVal @? "validator input"
+            ]
   where
     addrValPairs = fmap (\out -> (txOutAddress $ out, txOutValue out))
     inAddrVal = addrValPairs $ txInInfoResolved <$> (txInfoInputs . scriptContextTxInfo $ context)

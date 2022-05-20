@@ -99,8 +99,14 @@ library
 
 -- Test suites
 
-test-suite basic-tests
+test-suite simple-example
   import:         common-tests
   type:           exitcode-stdio-1.0
   main-is:        Main.hs
-  hs-source-dirs: examples/basic-tests
+  hs-source-dirs: examples/simple-example
+
+test-suite test
+  import:         common-tests
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  hs-source-dirs: test/

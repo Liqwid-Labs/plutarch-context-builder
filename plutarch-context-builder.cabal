@@ -67,16 +67,17 @@ common common-lang
   default-language:   Haskell2010
 
 common common-tests
-  import:          common-lang
+  import:        common-lang
   ghc-options:   -O2 -threaded -rtsopts -with-rtsopts=-N
   build-depends:
+    , bytestring
     , plutarch
     , plutarch-context-builder
-    , plutus-ledger-api
     , plutus-core
+    , plutus-ledger-api
     , QuickCheck
     , tasty
-    , bytestring
+    , tasty-hunit
 
 -- Libraries
 

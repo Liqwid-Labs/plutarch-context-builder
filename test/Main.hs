@@ -8,13 +8,15 @@ import Plutus.V1.Ledger.Api
 import Plutus.V1.Ledger.Value
 
 import Test.Tasty (adjustOption, defaultMain, testGroup)
-import Test.Tasty.QuickCheck
+import Test.Tasty.QuickCheck 
 
-import Control.Applicative
+import Control.Applicative (liftA2)
 import qualified Data.ByteString.Char8 as C
 import Data.ByteString.Hash (sha2)
 import GHC.IO.Encoding (setLocaleEncoding, utf8)
 
+-- SpendingBuilderElements is a one to one representation of Spending
+-- Builder API. 
 data SpendingBuilderElements datum
     = InputFromPubKey PubKeyHash Value
     | InputFromPubKeyWith PubKeyHash Value ()
@@ -29,6 +31,7 @@ data SpendingBuilderElements datum
     | ExtraData ()
     deriving stock (Show)
 
+-- Translate API representation into actual API.
 toSpendingBuilder :: forall datum redeemer. SpendingBuilderElements datum -> SpendingBuilder datum redeemer
 toSpendingBuilder (InputFromPubKey pk val) = inputFromPubKey pk val
 toSpendingBuilder (InputFromPubKeyWith pk val ()) = inputFromPubKeyWith pk val ()
@@ -62,39 +65,48 @@ genAssetClass =
 genAnyValue :: Gen Value
 genAnyValue = genAssetClass >>= genValue
 
+-- Arbitrary instance for SpendingBuilderElements with Unit as datum.
+-- It is required to use the free-shrinker of `Arbirary a => Arbitrary (List a)`
 instance Arbitrary (SpendingBuilderElements ()) where
     arbitrary = do
-        pk <- PubKeyHash . toBuiltin <$> genHashByteString
-        valhash <- ValidatorHash . toBuiltin <$> genHashByteString
-        val <- genAnyValue
+      -- These shouldn't effect performance since these are Lazy. I think...
+      pk <- PubKeyHash . toBuiltin <$> genHashByteString
+      valhash <- ValidatorHash . toBuiltin <$> genHashByteString
+      val <- genAnyValue
 
-        elements
-            [ InputFromPubKey pk val
-            , InputFromPubKeyWith pk val ()
-            , InputFromOtherScript valhash val ()
-            , InputSelfExtra val ()
-            , OutputToPubKey pk val
-            , OutputToPubKeyWith pk val ()
-            , OutputToOtherScript valhash val ()
-            , OutputToValidator val ()
-            , Mint val
-            , SignedWith pk
-            , ExtraData ()
-            ]
+      elements
+        [ InputFromPubKey pk val
+        , InputFromPubKeyWith pk val ()
+        , InputFromOtherScript valhash val ()
+        , InputSelfExtra val ()
+        , OutputToPubKey pk val
+        , OutputToPubKeyWith pk val ()
+        , OutputToOtherScript valhash val ()
+        , OutputToValidator val ()
+        , Mint val
+        , SignedWith pk
+        , ExtraData ()
+        ]
 
+-- Generates tuple of required information needed for ScriptContext generation.
 genBuilderElements :: Gen ([SpendingBuilderElements ()], ValidatorUTXO ())
 genBuilderElements = (,) <$> listOf1 arbitrary <*> (genAnyValue >>= pure . ValidatorUTXO ())
 
+-- shrinker for BuilderElements generator, it only uses the free-shrinker of list.
 shrinkBuilderElements ::
     ([SpendingBuilderElements ()], ValidatorUTXO ()) ->
     [([SpendingBuilderElements ()], ValidatorUTXO ())]
 shrinkBuilderElements (elms, v) = (,v) <$> shrink elms
 
+-- build ScriptContext from given list of SpendingBuilderElements and
+-- ValidatorUTXO--generator outputs--with default configuration.
 buildContext :: ([SpendingBuilderElements ()], ValidatorUTXO ()) -> Maybe ScriptContext
 buildContext (xs, vutxo) = spendingContext defaultConfig builder vutxo
   where
     builder = mconcat $ toSpendingBuilder <$> xs
 
+-- Check if given SpendingBuilderElements is correctly represented
+-- in the ScriptContext. Return True if it's correct, False otherwise.
 rules :: ScriptContext -> SpendingBuilderElements () -> Bool
 rules context spe = go spe
   where

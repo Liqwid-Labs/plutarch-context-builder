@@ -114,7 +114,7 @@ context =
             (ValidatorUTXO () $ val "self" 395869) -- input UTXO that is being validated.
 
 main :: IO ()
-main = 
+main =
     defaultMain $
         testGroup
             "Spending"

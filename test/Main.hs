@@ -62,10 +62,8 @@ genAssetClass =
 genAnyValue :: Gen Value
 genAnyValue = genAssetClass >>= genValue
 
-genBuilderElements :: Gen ([SpendingBuilderElements ()], ValidatorUTXO ())
-genBuilderElements = (,) <$> listOf1 (genElement) <*> (genAnyValue >>= pure . ValidatorUTXO ())
-  where
-    genElement = do
+instance Arbitrary (SpendingBuilderElements ()) where
+    arbitrary = do
         pk <- PubKeyHash . toBuiltin <$> genHashByteString
         valhash <- ValidatorHash . toBuiltin <$> genHashByteString
         val <- genAnyValue
@@ -84,10 +82,18 @@ genBuilderElements = (,) <$> listOf1 (genElement) <*> (genAnyValue >>= pure . Va
             , ExtraData ()
             ]
 
+genBuilderElements :: Gen ([SpendingBuilderElements ()], ValidatorUTXO ())
+genBuilderElements = (,) <$> listOf1 arbitrary <*> (genAnyValue >>= pure . ValidatorUTXO ())
+
+shrinkBuilderElements ::
+    ([SpendingBuilderElements ()], ValidatorUTXO ()) ->
+    [([SpendingBuilderElements ()], ValidatorUTXO ())]
+shrinkBuilderElements (elms, v) = (,v) <$> shrink elms
+
 buildContext :: ([SpendingBuilderElements ()], ValidatorUTXO ()) -> Maybe ScriptContext
 buildContext (xs, vutxo) = spendingContext defaultConfig builder vutxo
   where
-    builder = foldr1 (<>) $ (toSpendingBuilder <$> xs)
+    builder = mconcat $ toSpendingBuilder <$> xs
 
 rules :: ScriptContext -> SpendingBuilderElements () -> Bool
 rules context spe = go spe
@@ -104,7 +110,7 @@ rules context spe = go spe
         elem (addr, val) inAddrVal
     go (InputFromOtherScript (vhashToAddr -> addr) val ()) =
         elem (addr, val) inAddrVal
-    go (InputSelfExtra val datum) =
+    go (InputSelfExtra val _datum) =
         elem (vhashToAddr . configValidatorHash $ defaultConfig, val) inAddrVal
     go (OutputToPubKey (pkToAddr -> addr) val) =
         elem (addr, val) outAddrVal
@@ -112,20 +118,20 @@ rules context spe = go spe
         elem (addr, val) outAddrVal
     go (OutputToOtherScript (vhashToAddr -> addr) val ()) =
         elem (addr, val) outAddrVal
-    go (OutputToValidator val datum) =
+    go (OutputToValidator val _datum) =
         elem (vhashToAddr . configValidatorHash $ defaultConfig, val) outAddrVal
-    go (Mint val) = True
+    go (Mint _val) = True
     go (SignedWith pk) =
         let signers = txInfoSignatories . scriptContextTxInfo $ context
          in elem pk signers
     go (ExtraData ()) = True
 
-prop :: Property
-prop = forAll genBuilderElements go
+correctInputsAndOutputs :: Property
+correctInputsAndOutputs = forAllShrink genBuilderElements shrinkBuilderElements go
   where
     go elms = case buildContext elms of
         Nothing -> False
-        Just context -> foldr1 (&&) $ rules context <$> fst elms
+        Just context -> and $ rules context <$> fst elms
 
 main :: IO ()
 main = do
@@ -133,7 +139,8 @@ main = do
     defaultMain . adjustOption go $
         testGroup
             "context builder"
-            [testProperty "builder builds all inputs correctly" prop]
+            [ testProperty "builder inputs matches context" correctInputsAndOutputs
+            ]
   where
     go :: QuickCheckTests -> QuickCheckTests
     go = max 10_000

@@ -77,8 +77,8 @@ common common-tests
     , plutus-ledger-api
     , QuickCheck
     , tasty
-    , tasty-quickcheck
     , tasty-hunit
+    , tasty-quickcheck
 
 -- Libraries
 

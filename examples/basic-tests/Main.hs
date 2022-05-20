@@ -19,6 +19,10 @@ import Data.Maybe
 users :: [PubKeyHash]
 users = PubKeyHash . toBuiltin . sha2 . C.pack . show <$> ([1 ..] :: [Integer])
 
+-- Samething, for scripts
+scripts :: [ValidatorHash]
+scripts = ValidatorHash . toBuiltin . sha2 . C.pack . show <$> ([1 ..] :: [Integer])
+
 -- We need a configuration for the context builder. Configuration
 -- defines some of basic informations like transaction fee, time
 -- range, and more.
@@ -39,8 +43,8 @@ config =
 _config :: ContextConfig
 _config = defaultConfig{configValidatorHash = "90ab"}
 
-ac :: Value.AssetClass
-ac = Value.assetClass "abcd" "token_name"
+val :: TokenName -> Integer -> Value
+val tn n = Value.singleton "abcd" tn n
 
 -- Over the Base builder, there exist more specific builders for types
 -- of transactions--Spending, Minting, Rewarding, and
@@ -62,21 +66,29 @@ sb =
         [ -- [Inputs]
 
           -- regular input from public key. Pubkey and amount is required.
-          inputFromPubKey (users !! 1) $ Value.assetClassValue ac 2000000
+          inputFromPubKey (users !! 1) $ val "pubkey" 18237
         , -- regular input from public key with datum.
-          inputFromPubKeyWith (users !! 2) (Value.assetClassValue ac 19721121) ()
+          inputFromPubKeyWith (users !! 2) (val "pubkey" 384729) ()
         , -- input to the address that is being validated. This input,
           -- however, is *not* targeted to be validated.
-          inputSelfExtra (Value.assetClassValue ac 9575829) ()
-        , -- [Outputs]
+          inputSelfExtra (val "self" 429957) ()
+        , --
+          inputFromOtherScript (scripts !! 1) (val "script" 19721121) ()
+        , --
+
+          -- [Outputs]
 
           -- regular output to Pubkey, nothing special
-          outputToPubKey (users !! 1) $ Value.assetClassValue ac 48639572
+          outputToPubKey (users !! 1) $ val "pubkey" 682834
         , -- regular output to Pubkey with datum
-          outputToPubKeyWith (users !! 4) (Value.assetClassValue ac 92847592) ()
+          outputToPubKeyWith (users !! 4) (val "pubkey" 866720) ()
         , -- output to the target validator specified in the config
-          outputToValidator (Value.assetClassValue ac 12345) ()
-        , -- [Misc]
+          outputToValidator (val "self" 3984798) ()
+        , --
+          outputToOtherScript (scripts !! 2) (val "script" 1829385) ()
+        , --
+
+          -- [Misc]
 
           -- Transaction can be signed with a given PubKey
           signedWith (users !! 11)
@@ -99,10 +111,10 @@ context =
         spendingContext
             config -- configuration
             sb -- context builder
-            (ValidatorUTXO () $ Value.assetClassValue ac 687264) -- input UTXO that is being validated.
+            (ValidatorUTXO () $ val "self" 395869) -- input UTXO that is being validated.
 
 main :: IO ()
-main =
+main = 
     defaultMain $
         testGroup
             "Spending"
@@ -110,20 +122,25 @@ main =
                 let signers = txInfoSignatories . scriptContextTxInfo $ context
                 forM_ [11, 12] $ (\a -> (elem (users !! a) signers) @? "signer not found: " <> show a)
             , testCase "PubKey input" $ do
-                elem (userAddrs !! 1, Value.assetClassValue ac 2000000) inAddrVal @? "1"
-                elem (userAddrs !! 2, Value.assetClassValue ac 19721121) inAddrVal @? "2"
+                elem (userAddrs !! 1, val "pubkey" 18237) inAddrVal @? "1"
+                elem (userAddrs !! 2, val "pubkey" 384729) inAddrVal @? "2"
             , testCase "PubKey output" $ do
-                elem (userAddrs !! 1, Value.assetClassValue ac 48639572) outAddrVal @? "1"
-                elem (userAddrs !! 4, Value.assetClassValue ac 92847592) outAddrVal @? "4"
+                elem (userAddrs !! 1, val "pubkey" 682834) outAddrVal @? "1"
+                elem (userAddrs !! 4, val "pubkey" 866720) outAddrVal @? "4"
+            , testCase "Other script in" $ do
+                elem (scriptAddrs !! 1, val "script" 19721121) inAddrVal @? "1"
+            , testCase "Other script out" $ do
+                elem (scriptAddrs !! 2, val "script" 1829385) outAddrVal @? "2"
             , testCase "Validator input" $ do
-                elem (validatorAddr, Value.assetClassValue ac 687264) inAddrVal @? "validator input"
-                elem (validatorAddr, Value.assetClassValue ac 9575829) inAddrVal @? "extra input"
+                elem (validatorAddr, val "self" 395869) inAddrVal @? "validator input"
+                elem (validatorAddr, val "self" 429957) inAddrVal @? "extra input"
             , testCase "Validator output" $ do
-                elem (validatorAddr, Value.assetClassValue ac 12345) outAddrVal @? "validator input"
+                elem (validatorAddr, val "self" 3984798) outAddrVal @? "validator input"
             ]
   where
     addrValPairs = fmap (\out -> (txOutAddress $ out, txOutValue out))
     inAddrVal = addrValPairs $ txInInfoResolved <$> (txInfoInputs . scriptContextTxInfo $ context)
     outAddrVal = addrValPairs $ txInfoOutputs . scriptContextTxInfo $ context
     userAddrs = (flip Address Nothing) . PubKeyCredential <$> users
+    scriptAddrs = (flip Address Nothing) . ScriptCredential <$> scripts
     validatorAddr = scriptHashAddress "90ab"

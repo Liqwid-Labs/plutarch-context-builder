@@ -4,6 +4,7 @@ module Main (main) where
 
 import Plutarch.Context.Config
 import Plutarch.Context.Spending
+import Plutarch.Api.V1 (datumHash)
 import Plutus.V1.Ledger.Api
 import Plutus.V1.Ledger.Value
 
@@ -14,6 +15,8 @@ import Control.Applicative (liftA2)
 import qualified Data.ByteString.Char8 as C
 import Data.ByteString.Hash (sha2)
 import GHC.IO.Encoding (setLocaleEncoding, utf8)
+
+import Debug.Trace
 
 -- SpendingBuilderElements is a one to one representation of Spending
 -- Builder API. 
@@ -90,6 +93,7 @@ instance Arbitrary (SpendingBuilderElements ()) where
 
 -- Generates tuple of required information needed for ScriptContext generation.
 genBuilderElements :: Gen ([SpendingBuilderElements ()], ValidatorUTXO ())
+
 genBuilderElements = (,) <$> listOf1 arbitrary <*> (genAnyValue >>= pure . ValidatorUTXO ())
 
 -- shrinker for BuilderElements generator, it only uses the free-shrinker of list.
@@ -118,8 +122,9 @@ rules context spe = go spe
 
     go (InputFromPubKey (pkToAddr -> addr) val) =
         elem (addr, val) inAddrVal
-    go (InputFromPubKeyWith (pkToAddr -> addr) val ()) =
-        elem (addr, val) inAddrVal
+    go (InputFromPubKeyWith (pkToAddr -> addr) val dat) =
+      let dh = datumHash . Datum . toBuiltinData $ dat in
+        trace (show dh) $ elem (addr, val) inAddrVal
     go (InputFromOtherScript (vhashToAddr -> addr) val ()) =
         elem (addr, val) inAddrVal
     go (InputSelfExtra val _datum) =
@@ -155,4 +160,4 @@ main = do
             ]
   where
     go :: QuickCheckTests -> QuickCheckTests
-    go = max 10_000
+    go = max 10

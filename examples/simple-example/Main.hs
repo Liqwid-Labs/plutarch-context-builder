@@ -1,18 +1,49 @@
 module Main (main) where
 
-import Plutarch.Context.Config
-import Plutarch.Context.Spending
-import Plutus.V1.Ledger.Address
-import Plutus.V1.Ledger.Api
-import qualified Plutus.V1.Ledger.Value as Value
-
-import Test.Tasty (defaultMain, testGroup)
-import Test.Tasty.HUnit
-
-import Control.Monad
-import qualified Data.ByteString.Char8 as C
+import Control.Monad (forM_)
+import qualified Data.ByteString.Char8 as C (pack)
 import Data.ByteString.Hash (sha2)
-import Data.Maybe
+import Data.Maybe (fromJust)
+import Plutarch.Context.Config (ContextConfig (..), defaultConfig)
+import Plutarch.Context.Spending (
+    SpendingBuilder,
+    ValidatorUTXO (ValidatorUTXO),
+    inputFromOtherScript,
+    inputFromPubKey,
+    inputFromPubKeyWith,
+    inputSelfExtra,
+    outputToOtherScript,
+    outputToPubKey,
+    outputToPubKeyWith,
+    outputToValidator,
+    signedWith,
+    spendingContext,
+ )
+import Plutus.V1.Ledger.Address (
+    Address (Address),
+    scriptHashAddress,
+ )
+import Plutus.V1.Ledger.Api (
+    Credential (PubKeyCredential, ScriptCredential),
+    PubKeyHash (PubKeyHash),
+    ScriptContext (scriptContextTxInfo),
+    TokenName,
+    TxId (TxId),
+    TxInInfo (txInInfoResolved),
+    TxInfo (txInfoInputs, txInfoOutputs, txInfoSignatories),
+    TxOut (txOutAddress, txOutValue),
+    ValidatorHash (..),
+    Value,
+    always,
+    toBuiltin,
+ )
+import qualified Plutus.V1.Ledger.Value as Value (
+    adaSymbol,
+    adaToken,
+    singleton,
+ )
+import Test.Tasty (defaultMain, testGroup)
+import Test.Tasty.HUnit (testCase, (@?))
 
 -- Instead of having random PubKeyHashes, following list of "users"
 -- will be used in this example for simplicity purpose.

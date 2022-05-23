@@ -2,20 +2,20 @@
 
 module Main (main) where
 
-import Plutarch.Context.Config
-import Plutarch.Context.Spending
-import Plutarch.Api.V1 (datumHash)
-import Plutus.V1.Ledger.Api
-import Plutus.V1.Ledger.Value
-import Test.Tasty (adjustOption, defaultMain, testGroup)
-import Test.Tasty.QuickCheck 
 import Control.Applicative (liftA2)
 import qualified Data.ByteString.Char8 as C
 import Data.ByteString.Hash (sha2)
 import GHC.IO.Encoding (setLocaleEncoding, utf8)
+import Plutarch.Api.V1 (datumHash)
+import Plutarch.Context.Config
+import Plutarch.Context.Spending
+import Plutus.V1.Ledger.Api
+import Plutus.V1.Ledger.Value
+import Test.Tasty (adjustOption, defaultMain, testGroup)
+import Test.Tasty.QuickCheck
 
 -- SpendingBuilderElement is a one to one representation of Spending
--- Builder API. 
+-- Builder API.
 data SpendingBuilderElement
     = InputFromPubKey PubKeyHash Value
     | InputFromPubKeyWith PubKeyHash Value Integer
@@ -68,25 +68,25 @@ genAnyValue = genAssetClass >>= genValue
 -- It is required to use the free-shrinker of `Arbirary a => Arbitrary (List a)`
 instance Arbitrary SpendingBuilderElement where
     arbitrary = do
-      -- These shouldn't effect performance since these are Lazy. I think...
-      pk <- PubKeyHash . toBuiltin <$> genHashByteString
-      valhash <- ValidatorHash . toBuiltin <$> genHashByteString
-      val <- genAnyValue
-      datum <- arbitrary
+        -- These shouldn't effect performance since these are Lazy. I think...
+        pk <- PubKeyHash . toBuiltin <$> genHashByteString
+        valhash <- ValidatorHash . toBuiltin <$> genHashByteString
+        val <- genAnyValue
+        datum <- arbitrary
 
-      elements
-        [ InputFromPubKey pk val
-        , InputFromPubKeyWith pk val datum
-        , InputFromOtherScript valhash val datum
-        , InputSelfExtra val datum
-        , OutputToPubKey pk val
-        , OutputToPubKeyWith pk val datum
-        , OutputToOtherScript valhash val datum
-        , OutputToValidator val datum
-        , Mint val
-        , SignedWith pk
-        , ExtraData datum
-        ]
+        elements
+            [ InputFromPubKey pk val
+            , InputFromPubKeyWith pk val datum
+            , InputFromOtherScript valhash val datum
+            , InputSelfExtra val datum
+            , OutputToPubKey pk val
+            , OutputToPubKeyWith pk val datum
+            , OutputToOtherScript valhash val datum
+            , OutputToValidator val datum
+            , Mint val
+            , SignedWith pk
+            , ExtraData datum
+            ]
 
 -- Generates tuple of required information needed for ScriptContext generation.
 genBuilderElements :: Gen ([SpendingBuilderElement], ValidatorUTXO Integer)
@@ -107,14 +107,14 @@ buildContext (xs, vutxo) = spendingContext defaultConfig builder vutxo
 
 -- Check if given SpendingBuilderElement is correctly represented
 -- in the ScriptContext. Return True if it's correct, False otherwise.
-rules :: ScriptContext -> SpendingBuilderElement -> Bool
-rules context spe = go spe
+rules :: ScriptContext -> [SpendingBuilderElement] -> Property
+rules context spes = property $ conjoin $ go <$> spes
   where
     ins = txInInfoResolved <$> (txInfoInputs . scriptContextTxInfo $ context)
     outs = txInfoOutputs . scriptContextTxInfo $ context
     datumPairs = txInfoData . scriptContextTxInfo $ context
     validatorAddress = vhashToAddr . configValidatorHash $ defaultConfig
-    
+
     pkToAddr = (flip Address Nothing) . PubKeyCredential
     vhashToAddr = (flip Address Nothing) . ScriptCredential
 
@@ -126,69 +126,93 @@ rules context spe = go spe
     -- if exists.
     searchDatum :: DatumHash -> Maybe Data
     searchDatum dh
-      | null filtered = Nothing
-      | otherwise = Just . toData . snd . head $ filtered
+        | null filtered = Nothing
+        | otherwise = Just . toData . snd . head $ filtered
       where
         filtered = filter ((dh ==) . fst) datumPairs
 
     -- search given address, value pair in given list of TxOut
     check :: (Address, Value) -> [TxOut] -> Bool
     check (addr, val) os
-      | null filtered = False
-      | otherwise = True
+        | null filtered = False
+        | otherwise = True
       where
-        filtered = filter (\x -> addr == txOutAddress x && val == txOutValue x) os
+        filtered =
+            filter
+                ( \x ->
+                    addr == txOutAddress x
+                        && val == txOutValue x
+                )
+                os
 
     checkWithDatum :: (ToData a) => (Address, Value, a) -> [TxOut] -> Bool
     checkWithDatum (addr, val, dat) os
-      | null filtered = False
-      | otherwise = True
+        | null filtered = False
+        | otherwise = True
       where
-        filtered = filter (\x -> addr == txOutAddress x
-                              && val == txOutValue x
-                              && maybe False (toDatumHash dat ==) (txOutDatumHash x)) os
+        filtered =
+            filter
+                ( \x ->
+                    addr == txOutAddress x
+                        && val == txOutValue x
+                        && maybe False (toDatumHash dat ==) (txOutDatumHash x)
+                )
+                os
 
     -- Check if given data is currectly presented in ScriptContext.
     datumExists :: (FromData a, Eq a, ToData a) => a -> Bool
     datumExists val =
-      case searchDatum dh of
-        Just (fromData -> Just x) -> x == val
-        _ -> False
+        case searchDatum dh of
+            Just (fromData -> Just x) -> x == val
+            _ -> False
       where
         dh = toDatumHash val
 
-    go (InputFromPubKey (pkToAddr -> addr) val) = check (addr, val) ins
+    go (InputFromPubKey (pkToAddr -> addr) val) =
+        property $
+            check (addr, val) ins
     go (InputFromPubKeyWith (pkToAddr -> addr) val dat) =
-      checkWithDatum (addr, val, dat) ins &&
-      datumExists dat
+        property $
+            checkWithDatum (addr, val, dat) ins
+                && datumExists dat
     go (InputFromOtherScript (vhashToAddr -> addr) val dat) =
-      checkWithDatum (addr, val, dat) ins &&
-      datumExists dat
+        property $
+            checkWithDatum (addr, val, dat) ins
+                && datumExists dat
     go (InputSelfExtra val dat) =
-      checkWithDatum (validatorAddress, val, dat) ins &&
-      datumExists dat      
-    go (OutputToPubKey (pkToAddr -> addr) val) = check (addr, val) outs
+        property $
+            checkWithDatum (validatorAddress, val, dat) ins
+                && datumExists dat
+    go (OutputToPubKey (pkToAddr -> addr) val) =
+        property $
+            check (addr, val) outs
     go (OutputToPubKeyWith (pkToAddr -> addr) val dat) =
-      checkWithDatum (addr, val, dat) outs &&
-      datumExists dat
+        property $
+            checkWithDatum (addr, val, dat) outs
+                && datumExists dat
     go (OutputToOtherScript (vhashToAddr -> addr) val dat) =
-      checkWithDatum (addr, val, dat) outs &&
-      datumExists dat
+        property $
+            checkWithDatum (addr, val, dat) outs
+                && datumExists dat
     go (OutputToValidator val dat) =
-      checkWithDatum (validatorAddress, val, dat) outs &&
-      datumExists dat      
-    go (Mint _val) = True
+        property $
+            checkWithDatum (validatorAddress, val, dat) outs
+                && datumExists dat
+    go (Mint _val) = property $ True
     go (SignedWith pk) =
-        let signers = txInfoSignatories . scriptContextTxInfo $ context
-         in elem pk signers
-    go (ExtraData dat) = datumExists dat
+        property $
+            let signers = txInfoSignatories . scriptContextTxInfo $ context
+             in elem pk signers
+    go (ExtraData dat) =
+        property $
+            datumExists dat
 
 correctInputsAndOutputs :: Property
 correctInputsAndOutputs = forAllShrink genBuilderElements shrinkBuilderElements go
   where
     go elms = case buildContext elms of
-        Nothing -> False
-        Just context -> and $ rules context <$> fst elms
+        Nothing -> property False
+        Just context -> rules context $ fst elms
 
 main :: IO ()
 main = do

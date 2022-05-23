@@ -367,4 +367,4 @@ validatorOutDatums ::
 validatorOutDatums (acc1, acc2) vutxo@(ValidatorUTXO d _) = do
     txOut <- validatorTxOut vutxo
     let vdata = Base.datumWithHash . Base.datafy $ d
-    pure (pure txOut <> acc1, pure vdata <> acc2)  
+    pure (pure txOut <> acc1, pure vdata <> acc2)

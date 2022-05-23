@@ -107,9 +107,13 @@ buildContext (xs, vutxo) = spendingContext defaultConfig builder vutxo
 
 -- Check if given SpendingBuilderElement is correctly represented
 -- in the ScriptContext. Return True if it's correct, False otherwise.
-rules :: ScriptContext -> [SpendingBuilderElement] -> Property
-rules context spes = property $ conjoin $ go <$> spes
+rules :: ScriptContext -> ([SpendingBuilderElement], ValidatorUTXO Integer) -> Property
+rules context (spes, ValidatorUTXO vdat vval) = property $ validatorInput .&&. (conjoin $ go <$> spes)
   where
+    validatorInput = property $
+          checkWithDatum (validatorAddress, vval, vdat) ins
+          && datumExists vdat
+          
     ins = txInInfoResolved <$> (txInfoInputs . scriptContextTxInfo $ context)
     outs = txInfoOutputs . scriptContextTxInfo $ context
     datumPairs = txInfoData . scriptContextTxInfo $ context
@@ -212,7 +216,7 @@ correctInputsAndOutputs = forAllShrink genBuilderElements shrinkBuilderElements 
   where
     go elms = case buildContext elms of
         Nothing -> property False
-        Just context -> rules context $ fst elms
+        Just context -> rules context $ elms 
 
 main :: IO ()
 main = do

@@ -14,6 +14,9 @@ import Plutus.V1.Ledger.Value
 import Test.Tasty (adjustOption, defaultMain, testGroup)
 import Test.Tasty.QuickCheck
 
+validatorHash :: ValidatorHash
+validatorHash = ValidatorHash "111aaa"
+
 -- SpendingBuilderElement is a one to one representation of Spending
 -- Builder API.
 data SpendingBuilderElement
@@ -101,8 +104,9 @@ shrinkBuilderElements (elms, v) = (,v) <$> shrink elms
 -- build ScriptContext from given list of SpendingBuilderElement and
 -- ValidatorUTXO--generator outputs--with default configuration.
 buildContext :: ([SpendingBuilderElement], ValidatorUTXO Integer) -> Maybe ScriptContext
-buildContext (xs, vutxo) = spendingContext defaultConfig builder vutxo
+buildContext (xs, vutxo) = spendingContext conf builder vutxo
   where
+    conf = defaultConfig {configValidatorHash = validatorHash}
     builder = mconcat $ toSpendingBuilder <$> xs
 
 -- Check if given SpendingBuilderElement is correctly represented
@@ -117,7 +121,7 @@ rules context (spes, ValidatorUTXO vdat vval) = property $ validatorInput .&&. (
     ins = txInInfoResolved <$> (txInfoInputs . scriptContextTxInfo $ context)
     outs = txInfoOutputs . scriptContextTxInfo $ context
     datumPairs = txInfoData . scriptContextTxInfo $ context
-    validatorAddress = vhashToAddr . configValidatorHash $ defaultConfig
+    validatorAddress = vhashToAddr validatorHash
 
     pkToAddr = (flip Address Nothing) . PubKeyCredential
     vhashToAddr = (flip Address Nothing) . ScriptCredential
@@ -211,9 +215,13 @@ rules context (spes, ValidatorUTXO vdat vval) = property $ validatorInput .&&. (
         property $
             datumExists dat
 
-correctInputsAndOutputs :: Property
-correctInputsAndOutputs = forAllShrink genBuilderElements shrinkBuilderElements go
+spendingContextBuilder :: Property
+spendingContextBuilder = forAllShrink genBuilderElements shrinkBuilderElements go
   where
+    willFail elms = null $ filter (\case
+                               InputFromOtherScript valhash _ _ -> valhash /= validatorHash
+                               _ -> True) elms
+    cgo elms = cover 0.1 (willFail elms) "inputFromOtherScript with validatorHash" $ 
     go elms = case buildContext elms of
         Nothing -> property False
         Just context -> rules context $ elms 
@@ -224,7 +232,7 @@ main = do
     defaultMain . adjustOption go $
         testGroup
             "context builder"
-            [ testProperty "builder inputs matches context" correctInputsAndOutputs
+            [ testProperty "builder inputs matches context" spendingContextBuilder
             ]
   where
     go :: QuickCheckTests -> QuickCheckTests

@@ -3,16 +3,69 @@
 module Main (main) where
 
 import Control.Applicative (liftA2)
-import qualified Data.ByteString.Char8 as C
+import qualified Data.ByteString.Char8 as C (ByteString, pack)
 import Data.ByteString.Hash (sha2)
 import GHC.IO.Encoding (setLocaleEncoding, utf8)
 import Plutarch.Api.V1 (datumHash)
-import Plutarch.Context.Config
-import Plutarch.Context.Spending
-import Plutus.V1.Ledger.Api
-import Plutus.V1.Ledger.Value
+import Plutarch.Context.Config (
+    ContextConfig (configValidatorHash),
+    defaultConfig,
+ )
+import Plutarch.Context.Spending (
+    SpendingBuilder,
+    ValidatorUTXO (..),
+    extraData,
+    inputFromOtherScript,
+    inputFromPubKey,
+    inputFromPubKeyWith,
+    inputSelfExtra,
+    mint,
+    outputToOtherScript,
+    outputToPubKey,
+    outputToPubKeyWith,
+    outputToValidator,
+    signedWith,
+    spendingContext,
+ )
+import Plutus.V1.Ledger.Api (
+    Address (Address),
+    Credential (PubKeyCredential, ScriptCredential),
+    Data,
+    Datum (Datum),
+    DatumHash,
+    FromData,
+    PubKeyHash (PubKeyHash),
+    ScriptContext (scriptContextTxInfo),
+    ToData (..),
+    TxInInfo (txInInfoResolved),
+    TxInfo (txInfoData, txInfoInputs, txInfoOutputs, txInfoSignatories),
+    TxOut (txOutAddress, txOutDatumHash, txOutValue),
+    ValidatorHash (..),
+    Value,
+    fromData,
+    toBuiltin,
+    toData,
+ )
+import Plutus.V1.Ledger.Value (
+    AssetClass (AssetClass),
+    assetClassValue,
+    currencySymbol,
+    tokenName,
+ )
 import Test.Tasty (adjustOption, defaultMain, testGroup)
-import Test.Tasty.QuickCheck
+import Test.Tasty.QuickCheck (
+    Arbitrary (..),
+    Gen,
+    Property,
+    QuickCheckTests,
+    Testable (property),
+    chooseAny,
+    conjoin,
+    elements,
+    forAllShrink,
+    listOf1,
+    testProperty,
+ )
 
 validatorHash :: ValidatorHash
 validatorHash = ValidatorHash "111aaa"

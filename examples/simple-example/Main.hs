@@ -1,21 +1,52 @@
 module Main (main) where
 
-import Plutarch.Context.Config
-import Plutarch.Context.Spending
-import Plutus.V1.Ledger.Address
-import Plutus.V1.Ledger.Api
-import qualified Plutus.V1.Ledger.Value as Value
-
-import Test.Tasty (defaultMain, testGroup)
-import Test.Tasty.HUnit
-
-import Control.Monad
-import qualified Data.ByteString.Char8 as C
+import Control.Monad (forM_)
+import qualified Data.ByteString.Char8 as C (pack)
 import Data.ByteString.Hash (sha2)
-import Data.Maybe
+import Data.Maybe (fromJust)
+import Plutarch.Context.Config (ContextConfig (..), defaultConfig)
+import Plutarch.Context.Spending (
+    SpendingBuilder,
+    ValidatorUTXO (ValidatorUTXO),
+    inputFromOtherScript,
+    inputFromPubKey,
+    inputFromPubKeyWith,
+    inputSelfExtra,
+    outputToOtherScript,
+    outputToPubKey,
+    outputToPubKeyWith,
+    outputToValidator,
+    signedWith,
+    spendingContext,
+ )
+import Plutus.V1.Ledger.Address (
+    Address (Address),
+    scriptHashAddress,
+ )
+import Plutus.V1.Ledger.Api (
+    Credential (PubKeyCredential, ScriptCredential),
+    PubKeyHash (PubKeyHash),
+    ScriptContext (scriptContextTxInfo),
+    TokenName,
+    TxId (TxId),
+    TxInInfo (txInInfoResolved),
+    TxInfo (txInfoInputs, txInfoOutputs, txInfoSignatories),
+    TxOut (txOutAddress, txOutValue),
+    ValidatorHash (..),
+    Value,
+    always,
+    toBuiltin,
+ )
+import qualified Plutus.V1.Ledger.Value as Value (
+    adaSymbol,
+    adaToken,
+    singleton,
+ )
+import Test.Tasty (defaultMain, testGroup)
+import Test.Tasty.HUnit (testCase, (@?))
 
--- Instead of having random PubKeyHashes, following list of "users"
--- will be used in this example for simplicity purpose.
+-- Instead of having multiple random PubKeyHashes, following list of
+-- "users" will be used in this example for simplicity purpose.
 users :: [PubKeyHash]
 users = PubKeyHash . toBuiltin . sha2 . C.pack . show <$> ([1 ..] :: [Integer])
 
@@ -26,32 +57,30 @@ scripts = ValidatorHash . toBuiltin . sha2 . C.pack . show <$> ([1 ..] :: [Integ
 -- We need a configuration for the context builder. Configuration
 -- defines some of basic informations like transaction fee, time
 -- range, and more.
-config :: ContextConfig
-config =
+_config :: ContextConfig
+_config =
     ContextConfig
-        { configFee = Value.singleton Value.adaSymbol Value.adaToken 2000000
+        { configFee = Value.singleton Value.adaSymbol Value.adaToken 2_000_000
         , configTimeRange = always
-        , configTxId = (TxId "abcd")
-        , configCurrencySymbol = "ff"
-        , configValidatorHash = "90ab"
+        , configTxId = (TxId "eeee")
+        , configCurrencySymbol = "abc"
+        , configValidatorHash = "123cd"
         }
 
 -- `defaultConfig` is also provided so we can make some simpler
 -- configuration with ease.
 --
 -- Here, we only set a custom validatorHash for the builder config.
-_config :: ContextConfig
-_config = defaultConfig{configValidatorHash = "90ab"}
+config :: ContextConfig
+config = defaultConfig{configValidatorHash = "11aa"}
 
 val :: TokenName -> Integer -> Value
 val tn n = Value.singleton "abcd" tn n
 
--- Over the Base builder, there exist more specific builders for types
--- of transactions--Spending, Minting, Rewarding, and
--- Certifiying. Each of these specific builders will provides a
--- context specific, semigroup interfaces for construction. Generic
--- settings, like signers is backed up by the base builder.
---
+-- There exist specific builders for types of transactions--Spending
+-- and Minting. Each of these specific builders will provides a
+-- context specific, semigroup interfaces for construction.
+
 -- Here spending context is constructed. Inputs and outputs can be
 -- listed and combined with (<>) operator. When builder is complete,
 -- provided construct function builds the context. As compare to
@@ -61,39 +90,41 @@ val tn n = Value.singleton "abcd" tn n
 --
 sb :: SpendingBuilder () ()
 sb =
-    foldr1
-        (<>)
-        [ -- [Inputs]
+    -- [Inputs]
+    -- regular input from public key. Pubkey and amount is required.
+    (inputFromPubKey (users !! 1) $ val "pubkey" 18237)
+        <>
+        -- regular input from public key with datum.
+        (inputFromPubKeyWith (users !! 2) (val "pubkey" 384729) ())
+        <>
+        -- input to the address that is being validated. This input,
+        -- however, is *not* targeted to be validated.
+        (inputSelfExtra (val "self" 429957) ())
+        <>
+        -- input from ScriptCredential
+        (inputFromOtherScript (scripts !! 1) (val "script" 19721121) ())
+        <>
 
-          -- regular input from public key. Pubkey and amount is required.
-          inputFromPubKey (users !! 1) $ val "pubkey" 18237
-        , -- regular input from public key with datum.
-          inputFromPubKeyWith (users !! 2) (val "pubkey" 384729) ()
-        , -- input to the address that is being validated. This input,
-          -- however, is *not* targeted to be validated.
-          inputSelfExtra (val "self" 429957) ()
-        , --
-          inputFromOtherScript (scripts !! 1) (val "script" 19721121) ()
-        , --
+        -- [Outputs]
 
-          -- [Outputs]
+        -- regular output to Pubkey, nothing special
+        (outputToPubKey (users !! 1) $ val "pubkey" 682834)
+        <>
+        -- regular output to Pubkey with datum
+        (outputToPubKeyWith (users !! 4) (val "pubkey" 866720) ())
+        <>
+        -- output to the target validator specified in the config
+        (outputToValidator (val "self" 3984798) ())
+        <>
+        -- output to ScriptConfidential other than validatorHash
+        (outputToOtherScript (scripts !! 2) (val "script" 1829385) ())
+        <>
 
-          -- regular output to Pubkey, nothing special
-          outputToPubKey (users !! 1) $ val "pubkey" 682834
-        , -- regular output to Pubkey with datum
-          outputToPubKeyWith (users !! 4) (val "pubkey" 866720) ()
-        , -- output to the target validator specified in the config
-          outputToValidator (val "self" 3984798) ()
-        , --
-          outputToOtherScript (scripts !! 2) (val "script" 1829385) ()
-        , --
+        -- [Misc]
 
-          -- [Misc]
-
-          -- Transaction can be signed with a given PubKey
-          signedWith (users !! 11)
-        , signedWith (users !! 12)
-        ]
+        -- Transaction can be signed with a given PubKey
+        signedWith (users !! 11)
+        <> signedWith (users !! 12)
 
 -- The ScriptContext will be fabricated by
 -- `spendingContext`. Normally, this would happend right before using
@@ -143,4 +174,4 @@ main =
     outAddrVal = addrValPairs $ txInfoOutputs . scriptContextTxInfo $ context
     userAddrs = (flip Address Nothing) . PubKeyCredential <$> users
     scriptAddrs = (flip Address Nothing) . ScriptCredential <$> scripts
-    validatorAddr = scriptHashAddress "90ab"
+    validatorAddr = scriptHashAddress . configValidatorHash $ config

@@ -7,20 +7,16 @@ import Plutarch.Context.Spending
 import Plutarch.Api.V1 (datumHash)
 import Plutus.V1.Ledger.Api
 import Plutus.V1.Ledger.Value
-
 import Test.Tasty (adjustOption, defaultMain, testGroup)
 import Test.Tasty.QuickCheck 
-
 import Control.Applicative (liftA2)
 import qualified Data.ByteString.Char8 as C
 import Data.ByteString.Hash (sha2)
 import GHC.IO.Encoding (setLocaleEncoding, utf8)
 
-import Debug.Trace
-
--- SpendingBuilderElements is a one to one representation of Spending
+-- SpendingBuilderElement is a one to one representation of Spending
 -- Builder API. 
-data SpendingBuilderElements
+data SpendingBuilderElement
     = InputFromPubKey PubKeyHash Value
     | InputFromPubKeyWith PubKeyHash Value Integer
     | InputFromOtherScript ValidatorHash Value Integer
@@ -32,10 +28,10 @@ data SpendingBuilderElements
     | Mint Value
     | SignedWith PubKeyHash
     | ExtraData Integer
-    deriving stock (Show)
+    deriving stock (Show, Eq)
 
 -- Translate API representation into actual API.
-toSpendingBuilder :: forall redeemer. SpendingBuilderElements -> SpendingBuilder Integer redeemer
+toSpendingBuilder :: forall redeemer. SpendingBuilderElement -> SpendingBuilder Integer redeemer
 toSpendingBuilder (InputFromPubKey pk val) = inputFromPubKey pk val
 toSpendingBuilder (InputFromPubKeyWith pk val dat) = inputFromPubKeyWith pk val dat
 toSpendingBuilder (InputFromOtherScript valhash val dat) = inputFromOtherScript valhash val dat
@@ -68,9 +64,9 @@ genAssetClass =
 genAnyValue :: Gen Value
 genAnyValue = genAssetClass >>= genValue
 
--- Arbitrary instance for SpendingBuilderElements with Unit as datum.
+-- Arbitrary instance for SpendingBuilderElement with Unit as datum.
 -- It is required to use the free-shrinker of `Arbirary a => Arbitrary (List a)`
-instance Arbitrary SpendingBuilderElements where
+instance Arbitrary SpendingBuilderElement where
     arbitrary = do
       -- These shouldn't effect performance since these are Lazy. I think...
       pk <- PubKeyHash . toBuiltin <$> genHashByteString
@@ -93,55 +89,99 @@ instance Arbitrary SpendingBuilderElements where
         ]
 
 -- Generates tuple of required information needed for ScriptContext generation.
-genBuilderElements :: Gen ([SpendingBuilderElements], ValidatorUTXO Integer)
+genBuilderElements :: Gen ([SpendingBuilderElement], ValidatorUTXO Integer)
 genBuilderElements = (,) <$> listOf1 arbitrary <*> (genAnyValue >>= pure . ValidatorUTXO 0)
 
 -- shrinker for BuilderElements generator, it only uses the free-shrinker of list.
 shrinkBuilderElements ::
-    ([SpendingBuilderElements], ValidatorUTXO Integer) ->
-    [([SpendingBuilderElements], ValidatorUTXO Integer)]
+    ([SpendingBuilderElement], ValidatorUTXO Integer) ->
+    [([SpendingBuilderElement], ValidatorUTXO Integer)]
 shrinkBuilderElements (elms, v) = (,v) <$> shrink elms
 
--- build ScriptContext from given list of SpendingBuilderElements and
+-- build ScriptContext from given list of SpendingBuilderElement and
 -- ValidatorUTXO--generator outputs--with default configuration.
-buildContext :: ([SpendingBuilderElements], ValidatorUTXO Integer) -> Maybe ScriptContext
+buildContext :: ([SpendingBuilderElement], ValidatorUTXO Integer) -> Maybe ScriptContext
 buildContext (xs, vutxo) = spendingContext defaultConfig builder vutxo
   where
     builder = mconcat $ toSpendingBuilder <$> xs
 
--- Check if given SpendingBuilderElements is correctly represented
+-- Check if given SpendingBuilderElement is correctly represented
 -- in the ScriptContext. Return True if it's correct, False otherwise.
-rules :: ScriptContext -> SpendingBuilderElements -> Bool
+rules :: ScriptContext -> SpendingBuilderElement -> Bool
 rules context spe = go spe
   where
-    addrValPairs = fmap (\out -> (txOutAddress out, txOutValue out))
-    inAddrVal = addrValPairs $ txInInfoResolved <$> (txInfoInputs . scriptContextTxInfo $ context)
-    outAddrVal = addrValPairs $ txInfoOutputs . scriptContextTxInfo $ context
+    ins = txInInfoResolved <$> (txInfoInputs . scriptContextTxInfo $ context)
+    outs = txInfoOutputs . scriptContextTxInfo $ context
+    datumPairs = txInfoData . scriptContextTxInfo $ context
+    validatorAddress = vhashToAddr . configValidatorHash $ defaultConfig
+    
     pkToAddr = (flip Address Nothing) . PubKeyCredential
     vhashToAddr = (flip Address Nothing) . ScriptCredential
 
-    go (InputFromPubKey (pkToAddr -> addr) val) =
-        elem (addr, val) inAddrVal
+    -- Arbitrary data to DatumHash helper
+    toDatumHash :: (ToData a) => a -> DatumHash
+    toDatumHash = datumHash . Datum . toBuiltinData
+
+    -- Search given DatumHash in TxInfoData. Returns the matching data
+    -- if exists.
+    searchDatum :: DatumHash -> Maybe Data
+    searchDatum dh
+      | null filtered = Nothing
+      | otherwise = Just . toData . snd . head $ filtered
+      where
+        filtered = filter ((dh ==) . fst) datumPairs
+
+    -- search given address, value pair in given list of TxOut
+    check :: (Address, Value) -> [TxOut] -> Bool
+    check (addr, val) os
+      | null filtered = False
+      | otherwise = True
+      where
+        filtered = filter (\x -> addr == txOutAddress x && val == txOutValue x) os
+
+    checkWithDatum :: (ToData a) => (Address, Value, a) -> [TxOut] -> Bool
+    checkWithDatum (addr, val, dat) os
+      | null filtered = False
+      | otherwise = True
+      where
+        filtered = filter (\x -> addr == txOutAddress x
+                              && val == txOutValue x
+                              && maybe False (toDatumHash dat ==) (txOutDatumHash x)) os
+
+    -- Check if given data is currectly presented in ScriptContext.
+    datumExists :: (FromData a, Eq a, ToData a) => a -> Bool
+    datumExists val =
+      case searchDatum dh of
+        Just (fromData -> Just x) -> x == val
+        _ -> False
+      where
+        dh = toDatumHash val
+
+    go (InputFromPubKey (pkToAddr -> addr) val) = check (addr, val) ins
     go (InputFromPubKeyWith (pkToAddr -> addr) val dat) =
-      let dh = datumHash . Datum . toBuiltinData $ dat in
-        trace (show dh) $ elem (addr, val) inAddrVal
-    go (InputFromOtherScript (vhashToAddr -> addr) val _int) =
-        elem (addr, val) inAddrVal
-    go (InputSelfExtra val _datum) =
-        elem (vhashToAddr . configValidatorHash $ defaultConfig, val) inAddrVal
-    go (OutputToPubKey (pkToAddr -> addr) val) =
-        elem (addr, val) outAddrVal
-    go (OutputToPubKeyWith (pkToAddr -> addr) val _int) =
-        elem (addr, val) outAddrVal
-    go (OutputToOtherScript (vhashToAddr -> addr) val _int) =
-        elem (addr, val) outAddrVal
-    go (OutputToValidator val _datum) =
-        elem (vhashToAddr . configValidatorHash $ defaultConfig, val) outAddrVal
+      checkWithDatum (addr, val, dat) ins &&
+      datumExists dat
+    go (InputFromOtherScript (vhashToAddr -> addr) val dat) =
+      checkWithDatum (addr, val, dat) ins &&
+      datumExists dat
+    go (InputSelfExtra val dat) =
+      checkWithDatum (validatorAddress, val, dat) ins &&
+      datumExists dat      
+    go (OutputToPubKey (pkToAddr -> addr) val) = check (addr, val) outs
+    go (OutputToPubKeyWith (pkToAddr -> addr) val dat) =
+      checkWithDatum (addr, val, dat) outs &&
+      datumExists dat
+    go (OutputToOtherScript (vhashToAddr -> addr) val dat) =
+      checkWithDatum (addr, val, dat) outs &&
+      datumExists dat
+    go (OutputToValidator val dat) =
+      checkWithDatum (validatorAddress, val, dat) outs &&
+      datumExists dat      
     go (Mint _val) = True
     go (SignedWith pk) =
         let signers = txInfoSignatories . scriptContextTxInfo $ context
          in elem pk signers
-    go (ExtraData _int) = True
+    go (ExtraData dat) = datumExists dat
 
 correctInputsAndOutputs :: Property
 correctInputsAndOutputs = forAllShrink genBuilderElements shrinkBuilderElements go
@@ -160,4 +200,4 @@ main = do
             ]
   where
     go :: QuickCheckTests -> QuickCheckTests
-    go = max 10
+    go = max 10_000

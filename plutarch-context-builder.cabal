@@ -110,4 +110,5 @@ test-suite test
   import:         common-tests
   type:           exitcode-stdio-1.0
   main-is:        Main.hs
+  other-modules:  Spending
   hs-source-dirs: test/

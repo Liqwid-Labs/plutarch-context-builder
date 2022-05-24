@@ -104,7 +104,6 @@ sb =
         -- input from ScriptCredential
         (inputFromOtherScript (scripts !! 1) (val "script" 19721121) ())
         <>
-
         -- [Outputs]
 
         -- regular output to Pubkey, nothing special
@@ -119,7 +118,6 @@ sb =
         -- output to ScriptConfidential other than validatorHash
         (outputToOtherScript (scripts !! 2) (val "script" 1829385) ())
         <>
-
         -- [Misc]
 
         -- Transaction can be signed with a given PubKey

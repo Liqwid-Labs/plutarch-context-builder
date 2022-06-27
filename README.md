@@ -27,3 +27,10 @@ can combine builders with `<>`. Then, produce the required `ScriptContext` by
 providing a `ContextConfig` from the `Config` module.
 
 # What can I do with this?
+
+### Available support channels info
+
+You can find help, more information and ongoing discusion about the project here:
+- [link] - short description
+- [link] - short description
+

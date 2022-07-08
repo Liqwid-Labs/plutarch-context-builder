@@ -98,6 +98,10 @@ instance Semigroup (SpendingBuilder datum redeemer) where
     SB inner ins outs <> SB inner' ins' outs' =
         SB (inner <> inner') (ins <> ins') (outs <> outs')
 
+-- | @since 1.0.0
+instance Monoid (SpendingBuilder datum redeemer) where
+    mempty = SB mempty mempty mempty
+
 {- | UTxO at the validator's address. This represents an input that we /do/ want
  to validate.
 
